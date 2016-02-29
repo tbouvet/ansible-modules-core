@@ -577,6 +577,23 @@ def _docker_id_quirk(inspect):
         del inspect['ID']
     return inspect
 
+def _docker_swarm_quirk(self, container):
+    # If container is running in a swarm environment, omit the agent name in the container name
+    # Check only containers running through swarm (label com.docker.swarm.id)
+    name_list = container.get('Names')
+    labels = container.get('Labels')
+    new_names = None
+    if 'com.docker.swarm.id' in labels:
+       details = self.client.inspect_container(container['Id'])
+       if 'Node' in details:
+           new_names=[]
+           node_name = '/' + details['Node']['Name'] + '/'
+           for name in name_list:
+              new_name = name.replace(node_name,'/')
+              new_names.append(new_name)
+    if new_names:
+       name_list=new_names
+    return name_list
 
 def get_split_image_tag(image):
     # If image contains a host or org name, omit that from our check
@@ -1438,8 +1455,8 @@ class DockerManager(object):
 
             # NETWORK MODE
 
-            expected_netmode = self.module.params.get('net') or 'bridge'
-            actual_netmode = container['HostConfig']['NetworkMode'] or 'bridge'
+            expected_netmode = self.module.params.get('net') or 'default'
+            actual_netmode = container['HostConfig']['NetworkMode'] or 'default'
             if actual_netmode != expected_netmode:
                 self.reload_reasons.append('net ({0} => {1})'.format(actual_netmode, expected_netmode))
                 differing.append(container)
@@ -1531,7 +1548,7 @@ class DockerManager(object):
             details = None
 
             if name:
-                name_list = container.get('Names')
+                name_list = _docker_swarm_quirk(self, container)
                 if name_list is None:
                     name_list = []
                 matches = name in name_list
